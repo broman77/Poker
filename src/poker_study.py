@@ -1,18 +1,24 @@
 from __future__ import annotations
 
-import itertools
 import random
 import tkinter as tk
 from collections import Counter
-from tkinter import ttk, messagebox
+from tkinter import ttk
 
 RANKS = "23456789TJQKA"
 SUITS = "cdhs"
 RANK_VALUE = {r: i + 2 for i, r in enumerate(RANKS)}
 SUIT_SYMBOL = {"c": "♣", "d": "♦", "h": "♥", "s": "♠"}
 CATEGORY_NAMES = {
-    8: "Стрит-флеш", 7: "Каре", 6: "Фулл-хаус", 5: "Флеш", 4: "Стрит",
-    3: "Тройка", 2: "Две пары", 1: "Пара", 0: "Старшая карта",
+    8: "Стрит-флеш",
+    7: "Каре",
+    6: "Фулл-хаус",
+    5: "Флеш",
+    4: "Стрит",
+    3: "Тройка",
+    2: "Две пары",
+    1: "Пара",
+    0: "Старшая карта",
 }
 
 
@@ -21,27 +27,30 @@ def full_deck() -> list[str]:
 
 
 def card_label(card: str) -> str:
-    if not card:
-        return "—"
     return f"{card[0]}{SUIT_SYMBOL[card[1]]}"
 
 
-def five_card_rank(cards) -> tuple[int, tuple[int, ...]]:
+def five_card_rank(cards: list[str] | tuple[str, ...]) -> tuple[int, tuple[int, ...]]:
     if len(cards) != 5:
-        raise ValueError("five_card_rank expects exactly 5 cards")
+        raise ValueError("Нужно ровно 5 карт")
+    if len(set(cards)) != 5:
+        raise ValueError("Карты не должны повторяться")
+
     values = sorted((RANK_VALUE[c[0]] for c in cards), reverse=True)
     counts = Counter(values)
     groups = sorted(((cnt, val) for val, cnt in counts.items()), reverse=True)
     flush = len({c[1] for c in cards}) == 1
+
     unique = sorted(set(values), reverse=True)
     if 14 in unique:
         unique.append(1)
     straight_high = None
     for i in range(len(unique) - 4):
-        window = unique[i:i + 5]
+        window = unique[i : i + 5]
         if window[0] - window[4] == 4:
             straight_high = window[0]
             break
+
     if flush and straight_high:
         return 8, (straight_high,)
     fours = [val for cnt, val in groups if cnt == 4]
@@ -50,8 +59,8 @@ def five_card_rank(cards) -> tuple[int, tuple[int, ...]]:
         return 7, (four, max(v for v in values if v != four))
     trips = sorted((val for cnt, val in groups if cnt == 3), reverse=True)
     pairs = sorted((val for cnt, val in groups if cnt == 2), reverse=True)
-    if trips and (len(trips) >= 2 or pairs):
-        return 6, (trips[0], trips[1] if len(trips) >= 2 else pairs[0])
+    if trips and pairs:
+        return 6, (trips[0], pairs[0])
     if flush:
         return 5, tuple(values)
     if straight_high:
@@ -61,7 +70,8 @@ def five_card_rank(cards) -> tuple[int, tuple[int, ...]]:
         return 3, (trips[0], *kickers)
     if len(pairs) >= 2:
         top, second = pairs[:2]
-        return 2, (top, second, max(v for v in values if v not in (top, second)))
+        kicker = max(v for v in values if v not in (top, second))
+        return 2, (top, second, kicker)
     if len(pairs) == 1:
         pair = pairs[0]
         kickers = sorted((v for v in values if v != pair), reverse=True)[:3]
@@ -69,54 +79,21 @@ def five_card_rank(cards) -> tuple[int, tuple[int, ...]]:
     return 0, tuple(values)
 
 
-def best_rank(cards: list[str]) -> tuple[int, tuple[int, ...]]:
-    if len(cards) < 5:
-        raise ValueError("At least five cards are required")
-    return max(five_card_rank(combo) for combo in itertools.combinations(cards, 5))
-
-
 def category_name(cards: list[str]) -> str:
-    if len(cards) < 5:
-        return "Недостаточно карт для комбинации"
-    return CATEGORY_NAMES[best_rank(cards)[0]]
-
-
-def final_category_distribution(hero: list[str], board: list[str], simulations: int = 25000) -> dict[int, float]:
-    known = hero + board
-    if len(hero) != 2:
-        raise ValueError("Choose exactly two hole cards")
-    if len(set(known)) != len(known):
-        raise ValueError("Cards must be unique")
-    missing = 5 - len(board)
-    if not 0 <= missing <= 5:
-        raise ValueError("Board must have between 0 and 5 cards")
-    deck = [c for c in full_deck() if c not in known]
-    counts = Counter()
-    exact_count = 1
-    for i in range(missing):
-        exact_count = exact_count * (len(deck) - i) // (i + 1)
-    if exact_count <= 50000:
-        outcomes = itertools.combinations(deck, missing)
-        total = exact_count
-    else:
-        total = simulations
-        outcomes = (tuple(random.sample(deck, missing)) for _ in range(simulations))
-    for extra in outcomes:
-        counts[best_rank(hero + board + list(extra))[0]] += 1
-    return {cat: counts[cat] / total for cat in range(9)}
+    return CATEGORY_NAMES[five_card_rank(cards)[0]]
 
 
 class PokerStudyApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Poker Study — Hand Trainer")
-        self.geometry("980x690")
-        self.minsize(900, 620)
+        self.title("Poker Study — Combination Quiz")
+        self.geometry("900x560")
+        self.minsize(820, 520)
         self.configure(bg="#11151b")
+        self.current_hand: list[str] = []
         self._setup_style()
-        self.slots = []
         self._build_ui()
-        self.random_deal()
+        self.new_hand()
 
     def _setup_style(self) -> None:
         style = ttk.Style(self)
@@ -128,94 +105,47 @@ class PokerStudyApp(tk.Tk):
         style.configure("Panel.TFrame", background="#1a212b")
         style.configure("Title.TLabel", background="#11151b", foreground="#f4f7fb", font=("Segoe UI", 24, "bold"))
         style.configure("Sub.TLabel", background="#11151b", foreground="#9ba8b8", font=("Segoe UI", 10))
-        style.configure("Panel.TLabel", background="#1a212b", foreground="#f4f7fb", font=("Segoe UI", 11))
-        style.configure("Big.TLabel", background="#1a212b", foreground="#f4f7fb", font=("Segoe UI", 20, "bold"))
-        style.configure("TButton", font=("Segoe UI", 10, "bold"), padding=8)
-        style.configure("TCombobox", font=("Segoe UI", 14))
+        style.configure("Card.TLabel", background="#1a212b", foreground="#f4f7fb", font=("Segoe UI Symbol", 30, "bold"), padding=14)
+        style.configure("Answer.TLabel", background="#1a212b", foreground="#f4f7fb", font=("Segoe UI", 22, "bold"))
+        style.configure("TButton", font=("Segoe UI", 11, "bold"), padding=10)
 
     def _build_ui(self) -> None:
-        root = ttk.Frame(self, padding=24)
+        root = ttk.Frame(self, padding=28)
         root.pack(fill="both", expand=True)
+
         ttk.Label(root, text="Poker Study", style="Title.TLabel").pack(anchor="w")
-        ttk.Label(root, text="Учебный тренажёр комбинаций и вероятностей. Без ставок и подсказок для игры на деньги.", style="Sub.TLabel").pack(anchor="w", pady=(2, 18))
-        cards_panel = ttk.Frame(root, style="Panel.TFrame", padding=18)
-        cards_panel.pack(fill="x")
-        ttk.Label(cards_panel, text="Ваши карты", style="Panel.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
-        ttk.Label(cards_panel, text="Борд", style="Panel.TLabel").grid(row=0, column=3, columnspan=5, sticky="w", padx=(28, 0))
-        choices = [""] + full_deck()
-        for i in range(7):
-            var = tk.StringVar()
-            box = ttk.Combobox(cards_panel, textvariable=var, values=choices, width=5, state="readonly")
-            col = i if i < 2 else i + 1
-            box.grid(row=1, column=col, padx=(0 if i != 2 else 28, 8), pady=(8, 0))
-            self.slots.append((var, box))
-        buttons = ttk.Frame(root)
-        buttons.pack(fill="x", pady=14)
-        ttk.Button(buttons, text="Случайная раздача", command=self.random_deal).pack(side="left")
-        ttk.Button(buttons, text="Проанализировать", command=self.analyze).pack(side="left", padx=8)
-        ttk.Button(buttons, text="Очистить", command=self.clear_cards).pack(side="left")
-        summary = ttk.Frame(root, style="Panel.TFrame", padding=18)
-        summary.pack(fill="x", pady=(0, 14))
-        self.hand_label = ttk.Label(summary, text="—", style="Big.TLabel")
-        self.hand_label.pack(anchor="w")
-        self.detail_label = ttk.Label(summary, text="Выберите две карты и карты борда.", style="Panel.TLabel")
-        self.detail_label.pack(anchor="w", pady=(6, 0))
-        odds_panel = ttk.Frame(root, style="Panel.TFrame", padding=18)
-        odds_panel.pack(fill="both", expand=True)
-        ttk.Label(odds_panel, text="Вероятность итоговой комбинации к риверу", style="Panel.TLabel").pack(anchor="w")
-        self.tree = ttk.Treeview(odds_panel, columns=("combo", "chance"), show="headings", height=9)
-        self.tree.heading("combo", text="Комбинация")
-        self.tree.heading("chance", text="Вероятность")
-        self.tree.column("combo", width=280, anchor="w")
-        self.tree.column("chance", width=160, anchor="e")
-        self.tree.pack(fill="both", expand=True, pady=(10, 0))
-        ttk.Label(root, text="Расчёт предназначен для обучения теории вероятностей и распознавания комбинаций.", style="Sub.TLabel").pack(anchor="w", pady=(12, 0))
+        ttk.Label(root, text="Учебный тренажёр распознавания 5-карточных комбинаций.", style="Sub.TLabel").pack(anchor="w", pady=(2, 22))
 
-    def current_cards(self):
-        hero = [self.slots[i][0].get() for i in range(2)]
-        board = [self.slots[i][0].get() for i in range(2, 7)]
-        return [c for c in hero if c], [c for c in board if c]
+        panel = ttk.Frame(root, style="Panel.TFrame", padding=24)
+        panel.pack(fill="both", expand=True)
+        ttk.Label(panel, text="Назови комбинацию:", style="Answer.TLabel").pack(anchor="center", pady=(0, 18))
 
-    def random_deal(self) -> None:
-        cards = random.sample(full_deck(), 7)
-        for i, slot in enumerate(self.slots):
-            slot[0].set(cards[i] if i < 5 else "")
-        self.analyze()
+        self.cards_row = ttk.Frame(panel, style="Panel.TFrame")
+        self.cards_row.pack(pady=10)
+        self.card_labels: list[ttk.Label] = []
+        for _ in range(5):
+            label = ttk.Label(self.cards_row, text="--", style="Card.TLabel")
+            label.pack(side="left", padx=6)
+            self.card_labels.append(label)
 
-    def clear_cards(self) -> None:
-        for var, _ in self.slots:
-            var.set("")
-        self.hand_label.config(text="—")
-        self.detail_label.config(text="Выберите две карты и карты борда.")
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+        self.answer = ttk.Label(panel, text="Ответ скрыт", style="Answer.TLabel")
+        self.answer.pack(pady=(26, 14))
 
-    def analyze(self) -> None:
-        hero, board = self.current_cards()
-        known = hero + board
-        if len(hero) != 2:
-            messagebox.showinfo("Poker Study", "Выберите ровно две карманные карты.")
-            return
-        if len(set(known)) != len(known):
-            messagebox.showerror("Poker Study", "Одна и та же карта выбрана несколько раз.")
-            return
-        if len(board) < 3:
-            self.hand_label.config(text="До флопа")
-            self.detail_label.config(text="Вероятности рассчитываются симуляцией; добавьте флоп для точного перебора.")
-        else:
-            self.hand_label.config(text=category_name(known))
-            self.detail_label.config(text=f"Карты: {' '.join(card_label(c) for c in hero)}   |   Борд: {' '.join(card_label(c) for c in board)}")
-        try:
-            distribution = final_category_distribution(hero, board)
-        except ValueError as exc:
-            messagebox.showerror("Poker Study", str(exc))
-            return
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-        for cat in range(8, -1, -1):
-            chance = distribution.get(cat, 0.0)
-            if chance > 0.00005:
-                self.tree.insert("", "end", values=(CATEGORY_NAMES[cat], f"{chance * 100:.2f}%"))
+        buttons = ttk.Frame(panel, style="Panel.TFrame")
+        buttons.pack()
+        ttk.Button(buttons, text="Показать ответ", command=self.show_answer).pack(side="left", padx=6)
+        ttk.Button(buttons, text="Новая рука", command=self.new_hand).pack(side="left", padx=6)
+
+        ttk.Label(root, text="Только изучение комбинаций: без ставок, игровых советов, анализа соперников и расчёта шансов конкретной раздачи.", style="Sub.TLabel").pack(anchor="w", pady=(16, 0))
+
+    def new_hand(self) -> None:
+        self.current_hand = random.sample(full_deck(), 5)
+        for label, card in zip(self.card_labels, self.current_hand):
+            label.config(text=card_label(card))
+        self.answer.config(text="Ответ скрыт")
+
+    def show_answer(self) -> None:
+        self.answer.config(text=category_name(self.current_hand))
 
 
 def main() -> None:
